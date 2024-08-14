@@ -1,45 +1,36 @@
-name: Cut Release
+name: release
 
+# run only on tags
 on:
-  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
 
 permissions:
-  id-token: write
-  contents: write
-
-env:
-  VERSION_FILE: pkg/version/version.go
+    id-token: write # needed for federation
+    contents: write # needed to write releases
 
 jobs:
-  tag:
-    if: ${{ github.repository }} == 'chainguard-dev/bincapz'
-    runs-on: ubuntu-latest
+  release:
+    if: github.ref_type == 'tag' 
+    runs-on: macos-latest
     steps:
-    - uses: step-security/harden-runner@5c7944e73c4c2a096b17a9cb74d65b6c2bbafbde
-      with:
-        egress-policy: audit
-    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
-    - uses: chainguard-dev/actions/setup-gitsign@e82b4e5ae10182af72972addcb3fedf7454621c8
-    - name: Get Version
-      id: get-version
-      run: |
-        VERSION=$(awk -F'"' '/ID string =/ {print $2}' ${{ env.VERSION_FILE }})
-        if [[ ! "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          echo "Error: VERSION is not a valid semver"
-          exit 1
-        fi
-        echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
-    - name: Create Release
-      env:
-        GH_TOKEN: ${{ github.token }}
-      if: ${{ steps.get-version.outputs.VERSION != '' }}
-      run: |
-        VERSION=${{ steps.get-version.outputs.VERSION }}
-        if [[ ! "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          echo "Error: VERSION is not a valid semver"
-          exit 1
-        fi
-        git config --global tag.gpgsign true
-        git config user.name "github-actions[bot]"
-        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-        gh release create "$VERSION" --title "$VERSION" --notes "Release $VERSION" --draft
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32
+        with:
+          go-version: go.mod
+          cache: true
+      - uses: goto-bus-stop/setup-zig@7ab2955eb728f5440978d5824358023be3a2802d
+      - name: Set output
+        id: macos_sdk
+        run: echo "path=$(xcrun --show-sdk-path)" >> $GITHUB_OUTPUT
+      - uses: goreleaser/goreleaser-action@286f3b13b1b49da4ac219696163fb8c1c93e1200
+        with:
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SDK_PATH: ${{ steps.macos_sdk.outputs.path }}
+          VERSION: ${{ github.ref_name }}
